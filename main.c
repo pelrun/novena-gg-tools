@@ -96,24 +96,24 @@ int readDataFlashRow(int file, uint16_t rownum, uint8_t *data)
 int readInstructionFlashWordUnsafe(int file, uint16_t row_num, uint8_t col_num, uint32_t *word)
 {
     uint8_t addr[3];
-    uint32_t temp;
+    uint8_t temp[3];
     
-    addr[0] = row & 0xFF;
-    addr[1] = row >> 8;
-    addr[2] = col;
+    addr[0] = row_num & 0xFF;
+    addr[1] = row_num >> 8;
+    addr[2] = col_num;
     
     i2c_smbus_write_block_data(file, BR_Smb_FlashWrAddr, 3, addr);
     
-    if (i2c_smbus_read_block_data(file, BR_ReadRAMBlk, &temp) == 3)
+    if (i2c_smbus_read_block_data(file, BR_Smb_FlashRdWord, temp) == 3)
     {
-      *out = temp[0] | temp[1]<<8 | temp[2]<<16;
+      *word = temp[0] | temp[1]<<8 | temp[2]<<16;
       return 1;
     }
     
     return 0;
 }
 
-#define RIF_RETRIES 30
+#define RIF_RETRIES 1000
 #define RIF_THRESHOLD 3
 
 // read a instruction flash word until we get a consistent answer
@@ -127,7 +127,7 @@ void readInstructionFlashWord(int file, uint16_t row_num, uint8_t col_num, uint3
   {
     if (readInstructionFlashWordUnsafe(file, row_num, col_num, word))
     {
-      if (word == prevWord)
+      if (*word == prevWord)
       {
         if (++count == RIF_THRESHOLD)
         {
@@ -136,12 +136,12 @@ void readInstructionFlashWord(int file, uint16_t row_num, uint8_t col_num, uint3
       }
       else
       {
-        prevWord = word;
+        prevWord = *word;
         count = 0;
       }
     }
   }
-  
+  exitBootRom(file);
   // complete failure
   perror("Failed to get good instruction flash word");
   exit(1);
@@ -157,9 +157,9 @@ void readInstructionFlashRow(int file, uint16_t row_num, uint8_t *data)
   for (col_num=0; col_num<32; col_num++)
   {
     readInstructionFlashWord(file, row_num, col_num, &word);
-    data[index++] = word[0];
-    data[index++] = word[1];
-    data[index++] = word[2];
+    data[index++] = word & 0xFF;
+    data[index++] = (word>>8) & 0xFF;
+    data[index++] = (word>>16) & 0xFF;
   }
 }
 
@@ -199,6 +199,7 @@ int dumpInstructionFlash(int file, char *filename)
         {
             readInstructionFlashRow(file, row, data);
             fwrite(data, 32, 3, fp);
+            printf("Read row %d\n", row);
         }
         exitBootRom(file);
         fclose(fp);
@@ -251,10 +252,11 @@ int main()
         exit(1);
     }
 
+//    exitBootRom(file);
     firmwareVersion(file);
 
 //    dumpDataFlash(file, "gg.dfi");
-    dumpInstructionFlash(file, "gg.ifi");
+//    dumpInstructionFlash(file, "gg.ifi");
 
 //    setCellMode(file);
 //    setFlashOkVoltage(file, 0);
