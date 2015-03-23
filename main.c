@@ -79,17 +79,91 @@ int exitBootRom(int file)
     return i2c_smbus_write_byte(file, 8);
 }
 
+#define BR_Smb_FlashWrAddr 0x00
+#define BR_Smb_FlashRdWord 0x01
 #define BR_SetAddr    0x09
 #define BR_ReadRAMBlk 0x0c
 
-int readBootRomData(int file, uint16_t rownum, uint8_t *data)
+int readDataFlashRow(int file, uint16_t rownum, uint8_t *data)
 {
     uint16_t addr = 0x4000 + rownum*0x20;
     i2c_smbus_write_word_data(file, BR_SetAddr, addr);
     return i2c_smbus_read_block_data(file, BR_ReadRAMBlk, data);
 }
 
-int dumpBootRomData(int file, char *filename)
+// Instruction flash word is 22-bits wide.
+// Charlie Miller saw random corruption of the return value, so re-read a few times!
+int readInstructionFlashWordUnsafe(int file, uint16_t row_num, uint8_t col_num, uint32_t *word)
+{
+    uint8_t addr[3];
+    uint32_t temp;
+    
+    addr[0] = row & 0xFF;
+    addr[1] = row >> 8;
+    addr[2] = col;
+    
+    i2c_smbus_write_block_data(file, BR_Smb_FlashWrAddr, 3, addr);
+    
+    if (i2c_smbus_read_block_data(file, BR_ReadRAMBlk, &temp) == 3)
+    {
+      *out = temp[0] | temp[1]<<8 | temp[2]<<16;
+      return 1;
+    }
+    
+    return 0;
+}
+
+#define RIF_RETRIES 30
+#define RIF_THRESHOLD 3
+
+// read a instruction flash word until we get a consistent answer
+void readInstructionFlashWord(int file, uint16_t row_num, uint8_t col_num, uint32_t *word)
+{
+  int retry;
+  uint32_t prevWord=0x55FFFFFF; // guaranteed to not match an instruction flash word, which are only 22bit
+  int count = 0;
+  
+  for (retry = 0; retry<RIF_RETRIES; retry++)
+  {
+    if (readInstructionFlashWordUnsafe(file, row_num, col_num, word))
+    {
+      if (word == prevWord)
+      {
+        if (++count == RIF_THRESHOLD)
+        {
+          return;
+        }
+      }
+      else
+      {
+        prevWord = word;
+        count = 0;
+      }
+    }
+  }
+  
+  // complete failure
+  perror("Failed to get good instruction flash word");
+  exit(1);
+}
+
+void readInstructionFlashRow(int file, uint16_t row_num, uint8_t *data)
+{
+// Can't use the readflashrow command, as it requires a 96 byte smbus transfer
+// which we can't do here. So read it a word at a time.
+  int col_num, index;
+  uint32_t word;
+  
+  for (col_num=0; col_num<32; col_num++)
+  {
+    readInstructionFlashWord(file, row_num, col_num, &word);
+    data[index++] = word[0];
+    data[index++] = word[1];
+    data[index++] = word[2];
+  }
+}
+
+int dumpDataFlash(int file, char *filename)
 {
     FILE *fp;
 
@@ -98,11 +172,33 @@ int dumpBootRomData(int file, char *filename)
         int row = 0;
         uint8_t data[32];
 
-        printf("eBR: %d\n", enterBootRom(file));
+        enterBootRom(file);
         for (row=0; row<0x40; row++)
         {
-            readBootRomData(file, row, data);
+            readDataFlashRow(file, row, data);
             fwrite(data, 32, 1, fp);
+        }
+        exitBootRom(file);
+        fclose(fp);
+    }
+
+    return 0;
+}
+
+int dumpInstructionFlash(int file, char *filename)
+{
+    FILE *fp;
+
+    if ((fp = fopen(filename,"w")) != NULL)
+    {
+        int row = 0;
+        uint8_t data[32*3]; //22-bit instruction word
+
+        enterBootRom(file);
+        for (row=0; row<0x300; row++)
+        {
+            readInstructionFlashRow(file, row, data);
+            fwrite(data, 32, 3, fp);
         }
         exitBootRom(file);
         fclose(fp);
@@ -147,17 +243,21 @@ int main()
     }
 
     // Specify the address of the slave device.
+    // don't use I2C_SLAVE_FORCE or disable i2c device locking, disable the sbs-battery driver instead!
+    // the gg is too easily bricked to risk having the driver send commands at the same time as us.
     if (ioctl(file, I2C_SLAVE, GG_ADDRESS) < 0)
     {
         perror("Failed to acquire bus access and/or talk to slave");
         exit(1);
     }
 
-//    dumpBootRomData(file, "gg.dfi");
-//    setCellMode(file);
-
     firmwareVersion(file);
-    setFlashOkVoltage(file, 0);
+
+//    dumpDataFlash(file, "gg.dfi");
+    dumpInstructionFlash(file, "gg.ifi");
+
+//    setCellMode(file);
+//    setFlashOkVoltage(file, 0);
 
     return 0;
 }
