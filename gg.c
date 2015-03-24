@@ -7,11 +7,8 @@
 #include <fcntl.h>
 
 #include "i2c-dev.h"
-
-#define GG_ADDRESS        (0x16 >> 1)
-
-#define DF_CONFIGURATION 64
-#define DF_POWER 68
+#include "gg.h"
+#include "gg_api.h"
 
 void setFlashOkVoltage(int file, uint16_t millivolts)
 {
@@ -78,11 +75,6 @@ int exitBootRom(int file)
 {
     return i2c_smbus_write_byte(file, 8);
 }
-
-#define BR_Smb_FlashWrAddr 0x00
-#define BR_Smb_FlashRdWord 0x01
-#define BR_SetAddr    0x09
-#define BR_ReadRAMBlk 0x0c
 
 int readDataFlashRow(int file, uint16_t rownum, uint8_t *data)
 {
@@ -231,35 +223,3 @@ int firmwareVersion(int file)
     return 0;
 }
 
-int main()
-{
-    const char * devName = "/dev/i2c-0";
-
-    // Open up the I2C bus
-    int file = open(devName, O_RDWR);
-    if (file == -1)
-    {
-        perror(devName);
-        exit(1);
-    }
-
-    // Specify the address of the slave device.
-    // don't use I2C_SLAVE_FORCE or disable i2c device locking, disable the sbs-battery driver instead!
-    // the gg is too easily bricked to risk having the driver send commands at the same time as us.
-    if (ioctl(file, I2C_SLAVE, GG_ADDRESS) < 0)
-    {
-        perror("Failed to acquire bus access and/or talk to slave");
-        exit(1);
-    }
-
-//    exitBootRom(file);
-    firmwareVersion(file);
-
-//    dumpDataFlash(file, "gg.dfi");
-//    dumpInstructionFlash(file, "gg.ifi");
-
-//    setCellMode(file);
-//    setFlashOkVoltage(file, 0);
-
-    return 0;
-}

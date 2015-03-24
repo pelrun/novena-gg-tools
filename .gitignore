@@ -1,3 +1,4 @@
 *.dfi
 *.ifi
 *.hex
+*.o
