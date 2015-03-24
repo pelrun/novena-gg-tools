@@ -158,6 +158,7 @@ void readInstructionFlashRow(int file, uint16_t row_num, uint8_t *data)
 int dumpDataFlash(int file, char *filename)
 {
     FILE *fp;
+    int num_rows = 0x40;
 
     if ((fp = fopen(filename,"w")) != NULL)
     {
@@ -165,10 +166,11 @@ int dumpDataFlash(int file, char *filename)
         uint8_t data[32];
 
         enterBootRom(file);
-        for (row=0; row<0x40; row++)
+        for (row=0; row<num_rows; row++)
         {
             readDataFlashRow(file, row, data);
             fwrite(data, 32, 1, fp);
+            printf("Read data row %d/%d\n", row, num_rows-1);
         }
         exitBootRom(file);
         fclose(fp);
@@ -180,6 +182,7 @@ int dumpDataFlash(int file, char *filename)
 int dumpInstructionFlash(int file, char *filename)
 {
     FILE *fp;
+    int num_rows=0x400;
 
     if ((fp = fopen(filename,"w")) != NULL)
     {
@@ -187,11 +190,11 @@ int dumpInstructionFlash(int file, char *filename)
         uint8_t data[32*3]; //22-bit instruction word
 
         enterBootRom(file);
-        for (row=0; row<0x300; row++)
+        for (row=0; row<num_rows; row++)
         {
             readInstructionFlashRow(file, row, data);
             fwrite(data, 32, 3, fp);
-            printf("Read row %d\n", row);
+            printf("Read instruction row %d/%d\n", row, num_rows-1);
         }
         exitBootRom(file);
         fclose(fp);
