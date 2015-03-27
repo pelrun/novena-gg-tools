@@ -5,10 +5,13 @@
 #include <stdint.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
+#include <string.h>
 
 #include "i2c-dev.h"
 #include "gg.h"
 #include "gg_api.h"
+
+#define RETRIES 200
 
 void setFlashOkVoltage(int file, uint16_t millivolts)
 {
@@ -68,7 +71,7 @@ void setCellMode(int file)
 
 int enterBootRom(int file)
 {
-    return i2c_smbus_write_word_data(file, 0,0xf00);
+    return i2c_smbus_write_word_data(file, 0, 0xf00);
 }
 
 int exitBootRom(int file)
@@ -80,7 +83,161 @@ int readDataFlashRow(int file, uint16_t rownum, uint8_t *data)
 {
     uint16_t addr = 0x4000 + rownum*0x20;
     i2c_smbus_write_word_data(file, BR_SetAddr, addr);
-    return i2c_smbus_read_block_data(file, BR_ReadRAMBlk, data);
+    return (i2c_smbus_read_block_data(file, BR_ReadRAMBlk, data) == 0x20);
+}
+
+int writeDataFlashRow(int file, uint16_t rownum, uint8_t *data)
+{
+    uint8_t colnum;
+    int retry, ret;
+
+    printf("Writing data flash row %d\n", rownum);
+
+    for (colnum=0; colnum<32; colnum++)
+    {
+        uint16_t addr = 0x4000 + rownum*0x20 + colnum;
+
+        uint8_t block[3];
+        block[0] = addr & 0xFF;
+        block[1] = addr >> 8;
+        block[2] = data[colnum];
+
+        for (retry = RETRIES; retry > 0; retry--)
+        {
+            if (i2c_smbus_write_block_data(file, BR_Smb_FdataProgWord, 3, block) == 0)
+            {
+                break;
+            }
+            printf("Retrying write...\n");
+        }
+        if (retry == 0)
+        {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+int verifyErasedRows(int file, uint16_t rownum)
+{
+    uint8_t verify[32];
+
+    if (readDataFlashRow(file, rownum, verify))
+    {
+        int col = 0;
+        for (col = 0; col < 32; col++)
+        {
+            if (verify[col] != 0xFF)
+            {
+                return 0;
+            }
+        }
+    }
+    else
+    {
+        return 0;
+    }
+
+    return 1;
+}
+
+// WARNING: this erases two rows at a time
+int eraseDataFlashRow(int file, uint16_t rownum)
+{
+    uint8_t block[2];
+    int retry;
+
+    if (rownum & 1)
+    {
+        printf("ERASING WRONG ROW %d\n", rownum);
+        return 0;
+    }
+
+    printf("Erasing rows %d-%d...\n", rownum, rownum+1);
+
+    block[0] = rownum & 0xFF;
+    block[1] = rownum >> 8;
+
+    for (retry = RETRIES; retry > 0; retry--)
+    {
+        if (i2c_smbus_write_word_data(file, BR_Smb_FdataEraseRow, rownum) == 0)
+        {
+            sleep(1);
+            if (verifyErasedRows(file, rownum) && verifyErasedRows(file, rownum+1))
+            {
+                return 1;
+            }
+            printf("Verify erased row failed\n");
+        }
+        printf("Retrying erase...\n");
+    }
+
+    return 0;
+}
+
+int verifyDataFlashRow(int file, uint16_t rownum, uint8_t *data)
+{
+    uint8_t verify[32];
+
+    if (readDataFlashRow(file, rownum, verify))
+    {
+        if (memcmp(verify, data, 32) == 0)
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int writeDataFlash(int file, uint16_t rownum, uint8_t *data, uint16_t length)
+{
+    int bytes_remaining = length;
+    uint16_t current_row;
+    uint16_t num_rows = ((length>>6) | 1) * 2;
+    uint8_t padded_data[32];
+    int retry = 0;
+
+    if (rownum&1)
+    {
+        // the erase row semantics means starting from an odd row would delete the preceding row
+        // so don't do it.
+        return 0;
+    }
+
+    for (current_row = rownum; current_row<0x3e && bytes_remaining>0; current_row++)
+    {
+        if ((current_row & 1) == 0)
+        {
+            // erase the next two rows
+            if (eraseDataFlashRow(file, current_row) == 0)
+            {
+                return 0;
+            }
+        }
+
+        memset(padded_data, 0xFF, 32);
+        memcpy(padded_data, data+(current_row*0x20), (bytes_remaining>=32) ? 32 : bytes_remaining);
+
+        for (retry = RETRIES; retry>0; retry--)
+        {
+            writeDataFlashRow(file, current_row, padded_data);
+            if (verifyDataFlashRow(file, current_row, padded_data))
+            {
+                break;
+            }
+            printf("Row verify failed\n");
+        }
+        if (retry == 0)
+        {
+            return 0;
+        }
+
+        bytes_remaining -= 32;
+    }
+
+    return 1;
 }
 
 // Instruction flash word is 22-bits wide.
@@ -133,7 +290,6 @@ void readInstructionFlashWord(int file, uint16_t row_num, uint8_t col_num, uint3
       }
     }
   }
-  exitBootRom(file);
   // complete failure
   perror("Failed to get good instruction flash word");
   exit(1);
@@ -165,14 +321,12 @@ int dumpDataFlash(int file, char *filename)
         int row = 0;
         uint8_t data[32];
 
-        enterBootRom(file);
         for (row=0; row<num_rows; row++)
         {
             readDataFlashRow(file, row, data);
             fwrite(data, 32, 1, fp);
             printf("Read data row %d/%d\n", row, num_rows-1);
         }
-        exitBootRom(file);
         fclose(fp);
     }
 
@@ -189,14 +343,12 @@ int dumpInstructionFlash(int file, char *filename)
         int row = 0;
         uint8_t data[32*3]; //22-bit instruction word
 
-        enterBootRom(file);
         for (row=0; row<num_rows; row++)
         {
             readInstructionFlashRow(file, row, data);
             fwrite(data, 32, 3, fp);
             printf("Read instruction row %d/%d\n", row, num_rows-1);
         }
-        exitBootRom(file);
         fclose(fp);
     }
 

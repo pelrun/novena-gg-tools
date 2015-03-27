@@ -13,6 +13,11 @@ int exitBootRom(int file);
 
 int readDataFlashRow(int file, uint16_t rownum, uint8_t *data);
 
+// rownum must have lsb clear, will erase row and the next one
+int eraseDataFlashRow(int file, uint16_t rownum);
+
+int writeDataFlash(int file, uint16_t rownum, uint8_t *data, uint16_t length);
+
 // Instruction flash word is 22-bits wide.
 // Charlie Miller saw random corruption of the return value, so re-read a few times!
 // read a instruction flash word until we get a consistent answer
