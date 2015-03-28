@@ -1,0 +1,7 @@
+To reflash a locked gas gauge chip with a good flash dump, make sure the battery is connected and run:
+
+./flash xobs-gg.dfi
+
+Then configure the gas gauge via the senoko command line.
+
+It's not necessary to disable the sbs-battery driver or the senoko controller before flashing; it will retry until it works. If verification fails anyway just run the flash command again (just do *not* reset or power off the Novena unless flashing succeeds, or you may brick your gas gauge.)
