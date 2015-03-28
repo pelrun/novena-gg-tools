@@ -25,6 +25,8 @@ void readInstructionFlashWord(int file, uint16_t row_num, uint8_t col_num, uint3
 
 void readInstructionFlashRow(int file, uint16_t row_num, uint8_t *data);
 
+int verifyDataFlash(int file, uint8_t *data, uint16_t length);
+
 int dumpDataFlash(int file, char *filename);
 
 int dumpInstructionFlash(int file, char *filename);

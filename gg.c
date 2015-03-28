@@ -314,7 +314,7 @@ void readInstructionFlashRow(int file, uint16_t row_num, uint8_t *data)
 int dumpDataFlash(int file, char *filename)
 {
     FILE *fp;
-    int num_rows = 0x40;
+    int num_rows = 0x3E;
 
     if ((fp = fopen(filename,"w")) != NULL)
     {
@@ -331,6 +331,25 @@ int dumpDataFlash(int file, char *filename)
     }
 
     return 0;
+}
+
+int verifyDataFlash(int file, uint8_t *data, uint16_t length)
+{
+    int num_rows = 0x3E;
+    int bytes_remaining;
+    int row;
+    uint8_t flash_data[32];
+
+    for (row=0, bytes_remaining=length; row<num_rows && bytes_remaining>0; row++, bytes_remaining -= 32)
+    {
+        readDataFlashRow(file, row, flash_data);
+        if (memcmp(data+(row*0x20), flash_data, (bytes_remaining>32)?32:bytes_remaining) != 0)
+        {
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 int dumpInstructionFlash(int file, char *filename)

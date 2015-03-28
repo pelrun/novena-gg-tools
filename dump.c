@@ -25,7 +25,7 @@ int main()
     // Specify the address of the slave device.
     // don't use I2C_SLAVE_FORCE or disable i2c device locking, disable the sbs-battery driver instead!
     // the gg is too easily bricked to risk having the driver send commands at the same time as us.
-    if (ioctl(file, I2C_SLAVE, GG_ADDRESS) < 0)
+    if (ioctl(file, I2C_SLAVE_FORCE, GG_ADDRESS) < 0)
     {
         perror("Failed to acquire bus access and/or talk to slave");
         exit(1);
@@ -35,7 +35,7 @@ int main()
 
     enterBootRom(file);
     dumpDataFlash(file, "gg.dfi");
-    dumpInstructionFlash(file, "gg.ifi");
+//    dumpInstructionFlash(file, "gg.ifi");
     exitBootRom(file);
 
     return 0;
